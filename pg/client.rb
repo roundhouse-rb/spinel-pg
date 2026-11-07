@@ -82,6 +82,7 @@ class PgClientCore
     @parser = PgWireParser.new
     @ready = false
     @status = PG::PQTRANS_UNKNOWN
+    @lost = false
   end
 
   def ready?
@@ -97,9 +98,10 @@ class PgClientCore
   end
 
   def close
-    @t.write(PgWire.terminate)
-    @t.close
-    @status = PG::PQTRANS_UNKNOWN
+    if !@lost
+      @t.write(PgWire.terminate)
+      lost!
+    end
   end
 
   # -- plumbing ----------------------------------------------------------
@@ -111,11 +113,28 @@ class PgClientCore
       end
       chunk = @t.read_some(65536)
       if chunk.bytesize == 0
-        @status = PG::PQTRANS_UNKNOWN
-        raise "pg: connection lost"
+        lost!
+        raise PG::ConnectionBad.new("pg: connection lost", PgErrorResult.new(""))
       end
       @parser.feed(chunk)
     end
+  end
+
+  def write(data)
+    if @lost
+      raise PG::ConnectionBad.new("pg: connection is closed", PgErrorResult.new(""))
+    end
+    if @t.write(data) < 0
+      lost!
+      raise PG::ConnectionBad.new("pg: connection lost", PgErrorResult.new(""))
+    end
+  end
+
+  def lost!
+    @t.close
+    @lost = true
+    @ready = false
+    @status = PG::PQTRANS_UNKNOWN
   end
 
   def raise_error(body)
@@ -151,7 +170,7 @@ class PgClientCore
   # cleartext password, and SCRAM-SHA-256. MD5 is deliberately not
   # implemented (ledgered; modern servers default to SCRAM).
   def connect!
-    @t.write(PgWire.startup(@user, @database))
+    write(PgWire.startup(@user, @database))
     scram = PgScram.new("", @password, @nonce)
     while true
       m = read_msg
@@ -160,19 +179,19 @@ class PgClientCore
         if code == 0
           # authenticated; fall through to parameter/ready messages
         elsif code == 3
-          @t.write(PgWire.cleartext_password(@password))
+          write(PgWire.cleartext_password(@password))
         elsif code == 10
           mechs = PgDecode.sasl_mechanisms(m.body)
           if !mechs.include?("SCRAM-SHA-256")
             raise "pg: server offers no supported SASL mechanism (" + mechs + ")"
           end
-          @t.write(PgWire.sasl_initial("SCRAM-SHA-256", scram.client_first))
+          write(PgWire.sasl_initial("SCRAM-SHA-256", scram.client_first))
         elsif code == 11
           final = scram.client_final(PgDecode.sasl_data(m.body))
           if final.bytesize == 0
             raise "pg: " + scram.error
           end
-          @t.write(PgWire.sasl_response(final))
+          write(PgWire.sasl_response(final))
         elsif code == 12
           if !scram.verify_server_final(PgDecode.sasl_data(m.body))
             raise "pg: server signature verification failed"
@@ -198,7 +217,7 @@ class PgClientCore
   # Simple query, text results. Multi-statement strings work (last
   # result wins — enough for v0.1; ledgered).
   def exec(sql)
-    @t.write(PgWire.query(sql))
+    write(PgWire.query(sql))
     r = read_result
     r
   end
@@ -207,7 +226,7 @@ class PgClientCore
   # apart from the SQL ($1, $2, ...), so nothing is quoted or
   # interpolated. nil is SQL NULL; other values go as their to_s.
   def exec_params(sql, params)
-    @t.write(PgWire.parse("", sql.to_s) + portal_messages("", params))
+    write(PgWire.parse("", sql.to_s) + portal_messages("", params))
     r = read_result
     r
   end
@@ -215,13 +234,13 @@ class PgClientCore
   # Named prepared statement: parsed once, then run any number of times
   # with exec_prepared (no Parse). The result has no rows.
   def prepare(name, sql)
-    @t.write(PgWire.parse(name.to_s, sql.to_s) + PgWire.sync)
+    write(PgWire.parse(name.to_s, sql.to_s) + PgWire.sync)
     r = read_result
     r
   end
 
   def exec_prepared(name, params)
-    @t.write(portal_messages(name.to_s, params))
+    write(portal_messages(name.to_s, params))
     r = read_result
     r
   end
@@ -229,7 +248,7 @@ class PgClientCore
   # Frees a prepared statement on the server (the protocol's Close; same
   # effect as DEALLOCATE).
   def close_prepared(name)
-    @t.write(PgWire.close("S", name.to_s) + PgWire.sync)
+    write(PgWire.close("S", name.to_s) + PgWire.sync)
     r = read_result
     r
   end
@@ -303,7 +322,7 @@ class PgClientCore
         err_body = m.body
         failed = true
         if session_ending?(m.body)
-          @status = PG::PQTRANS_UNKNOWN
+          lost!
           raise_error(m.body)
         end
       elsif m.kind == "Z"

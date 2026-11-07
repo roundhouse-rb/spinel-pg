@@ -11,4 +11,7 @@ utf8         true
 count_null   0
 err_raises   true
 err_recovers true
+terminated   true
+lost_refuses true
+unreachable  true
 done

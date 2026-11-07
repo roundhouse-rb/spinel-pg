@@ -1,12 +1,13 @@
 # The real transport: TCP to a PostgreSQL server over sp_net. Same
 # duck as the scripted test transport (write / read_some / close).
 require "pg/sock"
+require "pg/errors"
 
 class PgTransport
   def initialize(host, port)
     @fd = PgSock.sp_net_connect(host, port)
     if @fd < 0
-      raise "pg: cannot connect to " + host + ":" + port.to_s
+      raise PG::ConnectionBad.new("pg: cannot connect to " + host + ":" + port.to_s, PgErrorResult.new(""))
     end
   end
 

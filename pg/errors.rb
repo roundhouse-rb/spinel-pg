@@ -39,6 +39,7 @@ module PG
     end
   end
 
+  class ConnectionBad < Error; end
   class ServerError < Error; end
   class FeatureNotSupported < ServerError; end
   class ConnectionException < ServerError; end
