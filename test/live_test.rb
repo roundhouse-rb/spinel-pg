@@ -71,6 +71,55 @@ puts "err_raises   " + raised.to_s
 r = c.exec("SELECT 42")
 puts "err_recovers " + (r.getvalue(0, 0) == "42").to_s
 
+# a session the server ends, then a port with nothing listening
+victim = pg_connect_retry(16450, "postgres", "spinel_test", "")
+pid = victim.exec("SELECT pg_backend_pid()").getvalue(0, 0)
+c.exec_params("SELECT pg_terminate_backend($1::int, 5000)", [pid])
+ended = false
+begin
+  victim.exec("SELECT 1")
+rescue PG::Error
+  ended = !victim.ready?
+end
+puts "terminated   " + ended.to_s
+refused = false
+begin
+  victim.exec("SELECT 1")
+rescue PG::ConnectionBad
+  refused = true
+end
+puts "lost_refuses " + refused.to_s
+unreachable = false
+begin
+  PG.connect("127.0.0.1", 16459, "postgres", "spinel_test", "")
+rescue PG::ConnectionBad
+  unreachable = true
+end
+puts "unreachable  " + unreachable.to_s
+
+# a host that is a directory: the server's unix socket in it
+u = PG.connect(DIR, 16450, "postgres", "spinel_test", "")
+puts "unix_socket  " + (u.exec("SELECT 7").getvalue(0, 0) == "7").to_s
+u.close
+missing = false
+begin
+  PG.connect(DIR + "/none", 16450, "postgres", "spinel_test", "")
+rescue PG::ConnectionBad
+  missing = true
+end
+puts "unix_missing " + missing.to_s
+
+# waits over the socket park only their green thread, as over TCP
+ENV["SPINEL_WORKERS"] = "1"
+waiters = []
+4.times { waiters.push(PG.connect(DIR, 16450, "postgres", "spinel_test", "")) }
+started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+threads = []
+waiters.each { |w| threads.push(Thread.new { w.exec("SELECT pg_sleep(0.3)") }) }
+threads.each { |t| t.join }
+puts "unix_overlap " + (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started < 0.9).to_s
+waiters.each { |w| w.close }
+
 c.close
 PgShell.sp_net_shell_capture("pg_ctl -D " + DIR + " stop -m immediate 2>&1 | tail -1; rm -rf " + DIR, 512)
 puts "done"

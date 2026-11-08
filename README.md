@@ -29,6 +29,9 @@ conn.close_prepared("by_id")
 conn.transaction_status   # => PG::PQTRANS_IDLE (or _INTRANS, _INERROR)
 ```
 
+A host that starts with `/` is the directory of the server's unix socket,
+as in libpq: `PG.connect("/tmp", 5432, ...)` opens `/tmp/.s.PGSQL.5432`.
+
 `ftype(column)` reports the PostgreSQL type OID from the result's
 RowDescription, including zero-row results. Column indexes are zero-based.
 Compatibility covers Integer indexes in the signed 32-bit range; within
@@ -96,13 +99,13 @@ instead of wrapping an unmapped SQLSTATE in `ActiveRecord::StatementInvalid`.
 Server errors no longer match a legacy `rescue RuntimeError`; change those
 handlers to `rescue PG::Error` (or `StandardError` for a general handler).
 An earlier `rescue RuntimeError` will not intercept a later `rescue PG::Error`.
-Bare rescues still catch server errors. Transport and local validation
-failures retain their existing exceptions.
+Bare rescues still catch server errors. A lost connection raises
+`PG::ConnectionBad`; local validation failures retain their existing
+exceptions.
 
 This supplies shared SQLSTATE mapping, not a drop-in Rails adapter. Rails'
 cached-plan check can use `result_error_field` with SQLSTATE `0A000` and
-source function `RevalidateCachedQuery`. Its connection-failure paths still
-need `PG::ConnectionBad` and pg's transport errors; its warning path needs
+source function `RevalidateCachedQuery`. Its warning path needs
 `set_notice_receiver` and `PG::Result::PG_DIAG_*`. Those APIs are not supplied.
 The missing-SQLSTATE fallback here is `PG::ServerError`, while pg's result
 lookup uses `PG::UnableToSend`. Startup errors also differ: this client
@@ -117,6 +120,8 @@ the connection stays usable. `transaction_status` reports the server's
 state: on `PG::PQTRANS_INERROR`, recover with `ROLLBACK` or `ROLLBACK TO
 SAVEPOINT`. FATAL and PANIC errors raise at once without waiting for
 ReadyForQuery; non-localized severity (`V`) decides, with `S` as the fallback.
+Once the connection is lost, `ready?` is false and later calls raise
+`PG::ConnectionBad` without writing.
 
 ## Auth: trust, cleartext, SCRAM-SHA-256
 
@@ -162,11 +167,11 @@ oracle: `gem install pg -- --with-pg-config=/opt/homebrew/opt/libpq/bin/pg_confi
   cache.
 - **Error compatibility**: a subset of the gem's SQLSTATE classes;
   diagnostic results expose fields, not the full `PG::Result` API. Messages
-  keep the client's existing format, and local/transport errors remain untyped.
+  keep the client's existing format, and local errors remain untyped.
 - **MD5 auth**, **TLS/sslmode** (sp_net TLS = matz/spinel#1054),
   **COPY** (`FROM STDIN` hangs), **LISTEN/NOTIFY**,
   **portals/cursors**, **binary format results**, **connection
-  pooling**, **unix sockets**.
+  pooling**.
 - Multi-statement `exec` strings: last result wins.
 - `PG.connect` is positional; the gem's kwargs/URL forms come with the
   seam work.
@@ -180,6 +185,9 @@ oracle: `gem install pg -- --with-pg-config=/opt/homebrew/opt/libpq/bin/pg_confi
 - matz/spinel#1778 — `String#include?` truncates at NUL bytes; tests
   use a byte-exact scan for wire assertions.
 - matz/spinel#1779 — sp_crypto explicit-length variants (found here).
+- matz/spinel#11269 — on builds before it, a unix-socket read holds its
+  worker and the other green threads wait; `unix_overlap` in
+  `live_test` checks it (found here).
 - On Spinel e5e8f794c, repeated exception `class.name` reads can report a
   stale name after storage is reused; `class.to_s` works. Error tests use
   `class.to_s` for the pg-gem comparison.

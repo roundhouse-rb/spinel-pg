@@ -2,10 +2,11 @@
 # out of nested modules), distinctly named to coexist with other
 # packages' extern modules in one program.
 module PgSock
-  ffi_func :sp_net_connect,     [:str, :int],       :int
-  ffi_func :sp_net_close,       [:int],             :int
-  ffi_func :sp_net_write_bytes, [:int, :str, :int], :int
-  ffi_func :sp_net_recv_some,   [:int, :int],       :binstr
+  ffi_func :sp_net_connect,      [:str, :int],       :int
+  ffi_func :sp_net_unix_connect, [:str],             :int
+  ffi_func :sp_net_close,        [:int],             :int
+  ffi_func :sp_net_write_bytes,  [:int, :str, :int], :int
+  ffi_func :sp_net_recv_some,    [:int, :int],       :binstr
 end
 
 module PgRand
