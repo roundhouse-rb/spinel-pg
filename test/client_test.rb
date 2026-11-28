@@ -180,6 +180,15 @@ rescue => e
 end
 puts "auth_err     " + raised.to_s
 
+def getvalue_raises(result, row, col, message)
+  begin
+    result.getvalue(row, col)
+  rescue ArgumentError => error
+    return error.message == message
+  end
+  false
+end
+
 # --- exec: two rows with a NULL, chunk-dribbled -------------------------------
 
 def rowdesc(names)
@@ -231,8 +240,8 @@ puts "exec_value   " + (v == "alice").to_s
 n = r.getvalue(1, 1)
 puts "exec_null    " + n.nil?.to_s
 puts "exec_nonnull " + (r.getvalue(1, 0) == "2").to_s
-oob = r.getvalue(9, 9)
-puts "exec_oob     " + oob.nil?.to_s
+puts "exec_oob_row " + (getvalue_raises(r, 2, 0, "invalid tuple number 2") && getvalue_raises(r, -1, 1, "invalid tuple number -1")).to_s
+puts "exec_oob_col " + (getvalue_raises(r, 0, 2, "invalid field number 2") && getvalue_raises(r, 1, -1, "invalid field number -1")).to_s
 
 # --- utf-8 both ways: SQL, field name, value, error message --------------------
 

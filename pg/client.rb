@@ -61,10 +61,13 @@ class PgResult
   end
 
   def getvalue(row, col)
-    idx = row * @fields.length + col
-    if idx < 0 || idx >= @values.length
-      return nil
+    if row < 0 || row >= ntuples
+      raise ArgumentError, "invalid tuple number " + row.to_s
     end
+    if col < 0 || col >= @fields.length
+      raise ArgumentError, "invalid field number " + col.to_s
+    end
+    idx = row * @fields.length + col
     if @nulls[idx] == 1
       return nil
     end

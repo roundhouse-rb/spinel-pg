@@ -26,6 +26,15 @@ def xq_connect_retry(port, db, user, password)
   end
 end
 
+def xq_no_value(result)
+  begin
+    result.getvalue(0, 0)
+  rescue ArgumentError => e
+    return e.message == "invalid tuple number 0"
+  end
+  false
+end
+
 def xq_no_type(result)
   begin
     result.ftype(0)
@@ -77,11 +86,11 @@ begin
   # The final command owns the result, even without a RowDescription (#8).
   r = c.exec("BEGIN; SELECT false; COMMIT")
   puts "batch_commit " + r.cmd_tag + " fields=" + r.nfields.to_s + " rows=" + r.ntuples.to_s
-  puts "commit_empty " + (xq_no_type(r) && r.getvalue(0, 0).nil?).to_s
+  puts "commit_empty " + (xq_no_type(r) && xq_no_value(r)).to_s
   c.exec("CREATE TEMP TABLE widgets (flag boolean)")
   r = c.exec("SELECT false; UPDATE widgets SET flag = true WHERE false")
   puts "batch_update " + r.cmd_tag + " fields=" + r.nfields.to_s + " rows=" + r.ntuples.to_s
-  puts "update_empty " + (xq_no_type(r) && r.getvalue(0, 0).nil?).to_s
+  puts "update_empty " + (xq_no_type(r) && xq_no_value(r)).to_s
   r = c.exec("SELECT false; SELECT 7::bigint AS last WHERE false")
   puts "batch_zero   " + (r.cmd_tag == "SELECT 0" && r.ntuples == 0 && r.nfields == 1 && r.fields[0] == "last" && r.ftype(0) == 20).to_s
   r = c.exec("")

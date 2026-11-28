@@ -42,6 +42,15 @@ def boundary_client(reply)
   client
 end
 
+def boundary_no_value(result)
+  begin
+    result.getvalue(0, 0)
+  rescue ArgumentError => error
+    return error.message == "invalid tuple number 0"
+  end
+  false
+end
+
 def boundary_no_type(result)
   begin
     result.ftype(0)
@@ -65,7 +74,7 @@ selected = description + row + boundary_complete("SELECT 1")
   end
   result = boundary_client(reply).exec(sql)
   boundary_check(last_tag + "_empty", result.cmd_tag == last_tag && result.nfields == 0 && result.ntuples == 0)
-  boundary_check(last_tag + "_values", result.fields.length == 0 && result.getvalue(0, 0).nil?)
+  boundary_check(last_tag + "_values", result.fields.length == 0 && boundary_no_value(result))
   boundary_check(last_tag + "_types", boundary_no_type(result))
 end
 
@@ -77,7 +86,7 @@ client = boundary_client(selected + notice + parameter + boundary_description("l
                          boundary_complete("SELECT 0") + notice + parameter + ready)
 result = client.exec("SELECT false; SELECT 7::bigint AS last WHERE false")
 boundary_check("last_zero_rows", result.cmd_tag == "SELECT 0" && result.ntuples == 0 && result.nfields == 1)
-boundary_check("last_zero_metadata", result.fields[0] == "last" && result.ftype(0) == 20 && result.getvalue(0, 0).nil?)
+boundary_check("last_zero_metadata", result.fields[0] == "last" && result.ftype(0) == 20 && boundary_no_value(result))
 
 client = boundary_client(selected + notice + parameter + ready)
 result = client.exec("SELECT false; ;")
@@ -105,7 +114,7 @@ boundary_check("notification_command", result.cmd_tag == "UPDATE 0" && result.nf
 client = boundary_client(selected + boundary_message("I", "") + ready)
 result = client.exec("")
 boundary_check("empty_response", result.cmd_tag == "" && result.nfields == 0 && result.ntuples == 0)
-boundary_check("empty_response_type", boundary_no_type(result) && result.getvalue(0, 0).nil?)
+boundary_check("empty_response_type", boundary_no_type(result) && boundary_no_value(result))
 
 # Replacing a NULL row must reset both flat values and parallel null flags.
 null_row = boundary_message("D", PgWire.be16(1) + PgWire.be32(-1))
