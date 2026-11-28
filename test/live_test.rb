@@ -109,6 +109,39 @@ rescue PG::ConnectionBad
 end
 puts "unix_missing " + missing.to_s
 
+# failed startups close their socket over TCP and over the unix socket
+t0 = PgTransport.new("127.0.0.1", 16450)
+fd0 = t0.fd
+t0.close
+tcp_failed = 0
+5.times do
+  begin
+    PG.connect("127.0.0.1", 16450, "no_such_db", "spinel_test", "")
+  rescue PG::InvalidCatalogName
+    tcp_failed = tcp_failed + 1
+  end
+end
+t1 = PgTransport.new("127.0.0.1", 16450)
+fd1 = t1.fd
+t1.close
+puts "tcp_fail_fd  " + (tcp_failed == 5 && fd1 == fd0).to_s
+
+u0 = PgTransport.new(DIR, 16450)
+ufd0 = u0.fd
+u0.close
+unix_failed = 0
+5.times do
+  begin
+    PG.connect(DIR, 16450, "no_such_db", "spinel_test", "")
+  rescue PG::InvalidCatalogName
+    unix_failed = unix_failed + 1
+  end
+end
+u1 = PgTransport.new(DIR, 16450)
+ufd1 = u1.fd
+u1.close
+puts "unix_fail_fd " + (unix_failed == 5 && ufd1 == ufd0).to_s
+
 # waits over the socket park only their green thread, as over TCP
 ENV["SPINEL_WORKERS"] = "1"
 waiters = []
