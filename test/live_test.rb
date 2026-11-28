@@ -71,6 +71,32 @@ puts "err_raises   " + raised.to_s
 r = c.exec("SELECT 42")
 puts "err_recovers " + (r.getvalue(0, 0) == "42").to_s
 
+# a session the server ends, then a port with nothing listening
+victim = pg_connect_retry(16450, "postgres", "spinel_test", "")
+pid = victim.exec("SELECT pg_backend_pid()").getvalue(0, 0)
+c.exec_params("SELECT pg_terminate_backend($1::int, 5000)", [pid])
+ended = false
+begin
+  victim.exec("SELECT 1")
+rescue PG::Error
+  ended = !victim.ready?
+end
+puts "terminated   " + ended.to_s
+refused = false
+begin
+  victim.exec("SELECT 1")
+rescue PG::ConnectionBad
+  refused = true
+end
+puts "lost_refuses " + refused.to_s
+unreachable = false
+begin
+  PG.connect("127.0.0.1", 16459, "postgres", "spinel_test", "")
+rescue PG::ConnectionBad
+  unreachable = true
+end
+puts "unreachable  " + unreachable.to_s
+
 c.close
 PgShell.sp_net_shell_capture("pg_ctl -D " + DIR + " stop -m immediate 2>&1 | tail -1; rm -rf " + DIR, 512)
 puts "done"
