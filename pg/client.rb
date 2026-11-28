@@ -117,7 +117,7 @@ class PgClientCore
       chunk = @t.read_some(65536)
       if chunk.bytesize == 0
         lost!
-        raise PG::ConnectionBad.new("pg: connection lost", PgErrorResult.new(""))
+        raise_connection_bad("pg: connection lost")
       end
       @parser.feed(chunk)
     end
@@ -125,19 +125,26 @@ class PgClientCore
 
   def write(data)
     if @lost
-      raise PG::ConnectionBad.new("pg: connection is closed", PgErrorResult.new(""))
+      raise_connection_bad("pg: connection is closed")
     end
     if @t.write(data) < 0
       lost!
-      raise PG::ConnectionBad.new("pg: connection lost", PgErrorResult.new(""))
+      raise_connection_bad("pg: connection lost")
     end
   end
 
   def lost!
-    @t.close
-    @lost = true
-    @ready = false
-    @status = PG::PQTRANS_UNKNOWN
+    if !@lost
+      @lost = true
+      @ready = false
+      @status = PG::PQTRANS_UNKNOWN
+      @t.close
+    end
+    nil
+  end
+
+  def raise_connection_bad(message)
+    raise PG::ConnectionBad.new(message, PgErrorResult.new(""))
   end
 
   def raise_error(body)
@@ -173,45 +180,53 @@ class PgClientCore
   # cleartext password, and SCRAM-SHA-256. MD5 is deliberately not
   # implemented (ledgered; modern servers default to SCRAM).
   def connect!
-    write(PgWire.startup(@user, @database))
-    scram = PgScram.new("", @password, @nonce)
-    while true
-      m = read_msg
-      if m.kind == "R"
-        code = PgDecode.auth_code(m.body)
-        if code == 0
-          # authenticated; fall through to parameter/ready messages
-        elsif code == 3
-          write(PgWire.cleartext_password(@password))
-        elsif code == 10
-          mechs = PgDecode.sasl_mechanisms(m.body)
-          if !mechs.include?("SCRAM-SHA-256")
-            raise "pg: server offers no supported SASL mechanism (" + mechs + ")"
+    @ready = false
+    begin
+      write(PgWire.startup(@user, @database))
+      scram = PgScram.new("", @password, @nonce)
+      while true
+        m = read_msg
+        if m.kind == "R"
+          code = PgDecode.auth_code(m.body)
+          if code == 0
+            # authenticated; fall through to parameter/ready messages
+          elsif code == 3
+            write(PgWire.cleartext_password(@password))
+          elsif code == 10
+            mechs = PgDecode.sasl_mechanisms(m.body)
+            if !mechs.include?("SCRAM-SHA-256")
+              raise_connection_bad("pg: server offers no supported SASL mechanism (" + mechs + ")")
+            end
+            write(PgWire.sasl_initial("SCRAM-SHA-256", scram.client_first))
+          elsif code == 11
+            final = scram.client_final(PgDecode.sasl_data(m.body))
+            if final.bytesize == 0
+              raise_connection_bad("pg: " + scram.error)
+            end
+            write(PgWire.sasl_response(final))
+          elsif code == 12
+            if !scram.verify_server_final(PgDecode.sasl_data(m.body))
+              raise_connection_bad("pg: server signature verification failed")
+            end
+          elsif code == 5
+            raise_connection_bad("pg: md5 auth not supported (configure scram-sha-256 or password)")
+          else
+            raise_connection_bad("pg: unsupported auth request code " + code.to_s)
           end
-          write(PgWire.sasl_initial("SCRAM-SHA-256", scram.client_first))
-        elsif code == 11
-          final = scram.client_final(PgDecode.sasl_data(m.body))
-          if final.bytesize == 0
-            raise "pg: " + scram.error
-          end
-          write(PgWire.sasl_response(final))
-        elsif code == 12
-          if !scram.verify_server_final(PgDecode.sasl_data(m.body))
-            raise "pg: server signature verification failed"
-          end
-        elsif code == 5
-          raise "pg: md5 auth not supported (configure scram-sha-256 or password)"
-        else
-          raise "pg: unsupported auth request code " + code.to_s
+        elsif m.kind == "E"
+          raise_error(m.body)
+        elsif m.kind == "Z"
+          track_status(m.body)
+          @ready = true
+          break
         end
-      elsif m.kind == "E"
-        raise_error(m.body)
-      elsif m.kind == "Z"
-        track_status(m.body)
-        @ready = true
-        return 0
+        # "S" ParameterStatus / "K" BackendKeyData / "N" notices: ignored
       end
-      # "S" ParameterStatus / "K" BackendKeyData / "N" notices: ignored
+      0
+    ensure
+      if !@ready
+        lost!
+      end
     end
   end
 

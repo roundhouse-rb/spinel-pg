@@ -2,4 +2,5 @@ scram_auth   true
 current_user scram_user
 query        42
 bad_pw       true
+bad_pw_fd    true
 done

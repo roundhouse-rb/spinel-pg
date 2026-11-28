@@ -51,5 +51,21 @@ rescue => e
 end
 puts "bad_pw       " + rejected.to_s
 
+t0 = PgTransport.new("127.0.0.1", 16451)
+fd0 = t0.fd
+t0.close
+pw_failed = 0
+5.times do
+  begin
+    PG.connect("127.0.0.1", 16451, "postgres", "scram_user", "wrong-pw")
+  rescue PG::InvalidPassword
+    pw_failed = pw_failed + 1
+  end
+end
+t1 = PgTransport.new("127.0.0.1", 16451)
+fd1 = t1.fd
+t1.close
+puts "bad_pw_fd    " + (pw_failed == 5 && fd1 == fd0).to_s
+
 ScramShell.sp_net_shell_capture("pg_ctl -D " + DIR + " stop -m immediate 2>&1 | tail -1; rm -rf " + DIR + " /tmp/spinel-pg-pwfile", 512)
 puts "done"

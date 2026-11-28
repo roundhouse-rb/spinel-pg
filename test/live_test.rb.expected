@@ -16,5 +16,7 @@ lost_refuses true
 unreachable  true
 unix_socket  true
 unix_missing true
+tcp_fail_fd  true
+unix_fail_fd true
 unix_overlap true
 done
