@@ -29,6 +29,9 @@ conn.close_prepared("by_id")
 conn.transaction_status   # => PG::PQTRANS_IDLE (or _INTRANS, _INERROR)
 ```
 
+A host that starts with `/` is the directory of the server's unix socket,
+as in libpq: `PG.connect("/tmp", 5432, ...)` opens `/tmp/.s.PGSQL.5432`.
+
 `ftype(column)` reports the PostgreSQL type OID from the result's
 RowDescription, including zero-row results. Column indexes are zero-based.
 Compatibility covers Integer indexes in the signed 32-bit range; within
@@ -168,7 +171,7 @@ oracle: `gem install pg -- --with-pg-config=/opt/homebrew/opt/libpq/bin/pg_confi
 - **MD5 auth**, **TLS/sslmode** (sp_net TLS = matz/spinel#1054),
   **COPY** (`FROM STDIN` hangs), **LISTEN/NOTIFY**,
   **portals/cursors**, **binary format results**, **connection
-  pooling**, **unix sockets**.
+  pooling**.
 - Multi-statement `exec` strings: last result wins.
 - `PG.connect` is positional; the gem's kwargs/URL forms come with the
   seam work.
@@ -182,6 +185,9 @@ oracle: `gem install pg -- --with-pg-config=/opt/homebrew/opt/libpq/bin/pg_confi
 - matz/spinel#1778 — `String#include?` truncates at NUL bytes; tests
   use a byte-exact scan for wire assertions.
 - matz/spinel#1779 — sp_crypto explicit-length variants (found here).
+- matz/spinel#11269 — on builds before it, a unix-socket read holds its
+  worker and the other green threads wait; `unix_overlap` in
+  `live_test` checks it (found here).
 - On Spinel e5e8f794c, repeated exception `class.name` reads can report a
   stale name after storage is reused; `class.to_s` works. Error tests use
   `class.to_s` for the pg-gem comparison.

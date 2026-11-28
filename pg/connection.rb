@@ -1,13 +1,20 @@
-# The real transport: TCP to a PostgreSQL server over sp_net. Same
-# duck as the scripted test transport (write / read_some / close).
+# The real transport: TCP to a PostgreSQL server over sp_net, or its
+# unix socket when host is a directory, as in libpq. Same duck as the
+# scripted test transport (write / read_some / close).
 require "pg/sock"
 require "pg/errors"
 
 class PgTransport
   def initialize(host, port)
-    @fd = PgSock.sp_net_connect(host, port)
+    if host.start_with?("/")
+      path = host + "/.s.PGSQL." + port.to_s
+      @fd = PgSock.sp_net_unix_connect(path)
+    else
+      path = host + ":" + port.to_s
+      @fd = PgSock.sp_net_connect(host, port)
+    end
     if @fd < 0
-      raise PG::ConnectionBad.new("pg: cannot connect to " + host + ":" + port.to_s, PgErrorResult.new(""))
+      raise PG::ConnectionBad.new("pg: cannot connect to " + path, PgErrorResult.new(""))
     end
   end
 

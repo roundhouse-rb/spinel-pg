@@ -14,4 +14,7 @@ err_recovers true
 terminated   true
 lost_refuses true
 unreachable  true
+unix_socket  true
+unix_missing true
+unix_overlap true
 done
